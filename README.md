@@ -12,5 +12,5 @@ We also tried to improve the method by considering in situ data measured by the 
 - The max depth of the profile 
 - The grounded flag 
 
-## Docummentation
+## Documentation
 [How to use the code](https://github.com/euroargodev/Coriolis-under-ice-positioning/blob/main/estimate_profile_locations_V1.0_20220825.pdf)
