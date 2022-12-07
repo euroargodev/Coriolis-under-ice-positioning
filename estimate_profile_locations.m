@@ -29,22 +29,22 @@ function estimate_profile_locations(varargin)
 % CONFIGURATION - START
 
 % default list of floats to process
-FLOAT_LIST_FILE_NAME = 'C:\Users\jprannou\_RNU\DecArgo_soft\lists\tmp.txt';
+FLOAT_LIST_FILE_NAME = './list_arvor_arcticgo.txt';
 % FLOAT_LIST_FILE_NAME = 'C:\Users\jprannou\_RNU\DecArgo_soft\lists\liste_snapshot_202202.txt';
-FLOAT_LIST_FILE_NAME = 'C:\Users\jprannou\_RNU\DecArgo_soft\lists\liste_snapshot_202202_prof_qc_8_9.txt';
+% FLOAT_LIST_FILE_NAME = 'C:\Users\jprannou\_RNU\DecArgo_soft\lists\liste_snapshot_202202_prof_qc_8_9.txt';
 
 % top directory of the NetCDF files
-DIR_INPUT_NC_FILES = 'C:\Users\jprannou\_DATA\DATA_UNDER_ICE\IN\';
+DIR_INPUT_NC_FILES = '/home/nicolas/Work/Data/ARGO/ARVOR-ICE-Pour-Camille/';
 % DIR_INPUT_NC_FILES = 'D:\202202-ArgoData\coriolis\';
 
 % directory of output files
-DIR_OUTPUT_FILES = 'C:\Users\jprannou\_DATA\DATA_UNDER_ICE\OUT6\';
+DIR_OUTPUT_FILES = './';
 
 % directory to store the log file
-DIR_LOG_FILE = 'C:\Users\jprannou\_RNU\DecArgo_soft\work\log\';
+DIR_LOG_FILE = './log/';
 
 % GEBCO bathymetric file
-GEBCO_FILE = 'C:\Users\jprannou\_RNU\_ressources\GEBCO_2021\GEBCO_2021.nc';
+GEBCO_FILE = './GEBCO_2022.nc';
 
 % max difference (in meters) between sea bottom and float parking drift to start
 DIFF_DEPTH_TO_START = 100000;
@@ -60,10 +60,14 @@ FLOAT_VS_BATHY_TOLERANCE_FOR_GRD = 170;
 FIRST_RANGE = 20;
 
 % last range value (in kilometers)
-LAST_RANGE = 20;
+LAST_RANGE = 250;
 
 % range period (in kilometers)
-RANGE_PERIOD = 5;
+RANGE_PERIOD = 10;
+
+% plot types
+PLOT_PNG = 1;
+PLOT_PDF = 1;
 
 % CONFIGURATION - END
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -80,14 +84,18 @@ global g_estProfLoc_floatVsbathyToleranceForGrd;
 global g_estProfLoc_firstRange;
 global g_estProfLoc_lastRange;
 global g_estProfLoc_rangePeriod;
+global g_estProfLoc_plotPng;
+global g_estProfLoc_plotPdf;
 
-g_estProfLoc_version = '1.0';
+g_estProfLoc_version = '1.1';
 g_estProfLoc_diffDepthToStart = DIFF_DEPTH_TO_START;
 g_estProfLoc_floatVsbathyTolerance = FLOAT_VS_BATHY_TOLERANCE;
 g_estProfLoc_floatVsbathyToleranceForGrd = FLOAT_VS_BATHY_TOLERANCE_FOR_GRD;
 g_estProfLoc_firstRange = FIRST_RANGE;
 g_estProfLoc_lastRange = LAST_RANGE;
 g_estProfLoc_rangePeriod = RANGE_PERIOD;
+g_estProfLoc_plotPng = PLOT_PNG;
+g_estProfLoc_plotPdf = PLOT_PDF;
 
 
 % check inputs
@@ -192,12 +200,18 @@ function process_float_data(a_floatNum, a_floatData, a_outputDir, a_gebcoFilePat
 global g_estProfLoc_diffDepthToStart;
 
 % QC flag values (numerical)
+global g_decArgo_qcProbablyGood;
 global g_decArgo_qcInterpolated;
 global g_decArgo_qcMissing;
 
 
 % define the sets of cycles to process
 pos = ones(size(a_floatData.positionQc));
+if (a_floatData.positionQc(end) == g_decArgo_qcInterpolated)
+   fprintf('WARNING: Float %d: inconsistent data (last profile location has QC = 8) - set to 1\n', a_floatNum);
+   a_floatData.positionQc(end) = g_decArgo_qcProbablyGood;
+end
+
 idF = find((a_floatData.positionQc == g_decArgo_qcInterpolated) | (a_floatData.positionQc == g_decArgo_qcMissing));
 pos(idF) = 0;
 startIdList = find(diff(pos) == -1);
@@ -208,8 +222,8 @@ if (isempty(startIdList))
 end
 
 if (length(startIdList) ~= length(stopIdList))
-   if ((a_floatData.positionQc(end) == g_decArgo_qcInterpolated) || (a_floatData.positionQc(end) == g_decArgo_qcMissing))
-      fprintf('ERROR: Float %d: inconsistent data (last profile location has QC = 8 or 9) - ignored\n', a_floatNum);
+   if (a_floatData.positionQc(end) == g_decArgo_qcMissing)
+      fprintf('ERROR: Float %d: inconsistent data (last profile location has QC = 9) - ignored\n', a_floatNum);
       return
    else
       fprintf('ERROR: Float %d: unknown reason (TO BE CHECKED) - ignored\n', a_floatNum);
@@ -365,6 +379,8 @@ global g_estProfLoc_floatVsbathyToleranceForGrd;
 global g_estProfLoc_firstRange;
 global g_estProfLoc_lastRange;
 global g_estProfLoc_rangePeriod;
+global g_estProfLoc_plotPng;
+global g_estProfLoc_plotPdf;
 
 
 % consider only data of the set
@@ -464,6 +480,15 @@ for idLoop = 1:2
 
          % create the set of locations on the search segment
          [lonTab, latTab] = get_loc_on_search_range(longitude([idC idC+1]), latitude([idC idC+1]), idC*range, tetaDeg);
+         if (any((lonTab < -180) | (lonTab >= 360) | ...
+               (latTab < -90) | (latTab > 90)))
+            idLonKo = find((lonTab < -180) | (lonTab >= 360));
+            lonTab(idLonKo) = [];
+            latTab(idLonKo) = [];
+            idLatKo = find((latTab < -90) | (latTab > 90));
+            lonTab(idLatKo) = [];
+            latTab(idLatKo) = [];
+         end
 
          % retrieve location depth
          depthVal = get_gebco_depth(lonTab, latTab, a_gebcoFilePathName);
@@ -531,7 +556,7 @@ for idLoop = 1:2
          dir, ...
          range, ...
          koOk);
-      pngFileName = sprintf('%d_%03d-%03d_%s_range_%d_%s.png', ...
+      plotFileName = sprintf('%d_%03d-%03d_%s_range_%d_%s', ...
          a_floatNum, ...
          cycleNumber(1), ...
          cycleNumber(end), ...
@@ -548,7 +573,7 @@ for idLoop = 1:2
       idDone = find(devTabFlag == 2);
       [lonMin, lonMax, latMin, latMax] = compute_geo_extrema( ...
          [], [longitudeOri lonTabAll(idDone)'], [latitudeOri latTabAll(idDone)'], 0);
-      [elevC, lonC , latC] = get_gebco_elev_zone(lonMin, lonMax, latMin, latMax, '');
+      [elevC, lonC , latC] = get_gebco_elev_zone(lonMin, lonMax, latMin, latMax, a_gebcoFilePathName);
 
       cla;
 
@@ -627,7 +652,13 @@ for idLoop = 1:2
       legend(legendPlots, legendLabels, 'Location', 'NorthEastOutside', 'Tag', 'Legend');
 
       if (done || (range == g_estProfLoc_lastRange))
-         print('-dpng', [a_outputDir '/' pngFileName]);
+         if (g_estProfLoc_plotPng)
+            print('-dpng', [a_outputDir '/' plotFileName '.png']);
+         end
+         if (g_estProfLoc_plotPdf)
+            orient landscape
+            print('-bestfit', '-dpdf', [a_outputDir '/' plotFileName '.pdf']);
+         end
       end
 
       %       fprintf('Press any key ...');
@@ -648,7 +679,7 @@ if (done)
       cycleNumber(1), ...
       cycleNumber(end));
 
-   pngFileName = sprintf('%d_%03d-%03d_3_final.png', ...
+   plotFileName = sprintf('%d_%03d-%03d_3_final', ...
       a_floatNum, ...
       cycleNumber(1), ...
       cycleNumber(end));
@@ -659,7 +690,7 @@ if (done)
 
    [lonMin, lonMax, latMin, latMax] = compute_geo_extrema( ...
       [], [longitudeOri resultF(:, 1)' resultB(:, 1)'], [latitudeOri resultF(:, 2)' resultB(:, 2)'], 0);
-   [elevC, lonC , latC] = get_gebco_elev_zone(lonMin, lonMax, latMin, latMax, '');
+   [elevC, lonC , latC] = get_gebco_elev_zone(lonMin, lonMax, latMin, latMax, a_gebcoFilePathName);
 
    cla;
 
@@ -716,8 +747,13 @@ if (done)
    % plot legend
    legend(legendPlots, legendLabels, 'Location', 'NorthEastOutside', 'Tag', 'Legend');
 
-   print('-dpng', [a_outputDir '/' pngFileName]);
-
+   if (g_estProfLoc_plotPng)
+      print('-dpng', [a_outputDir '/' plotFileName '.png']);
+   end
+   if (g_estProfLoc_plotPdf)
+      orient landscape
+      print('-bestfit', '-dpdf', [a_outputDir '/' plotFileName '.pdf']);
+   end
 
    %    fprintf('Press any key ...');
    %    pause
@@ -1229,6 +1265,9 @@ global g_estProfLoc_version;
 global g_estProfLoc_diffDepthToStart;
 global g_estProfLoc_floatVsbathyTolerance;
 global g_estProfLoc_floatVsbathyToleranceForGrd;
+global g_estProfLoc_firstRange;
+global g_estProfLoc_lastRange;
+global g_estProfLoc_rangePeriod;
 
 
 % CSV file creation
@@ -1244,12 +1283,12 @@ header = ['WMO;CyNum;Dir;Juld;JuldQC;JuldLoc;Lat;Lon;PosQC;Speed;ProfPresMax;' .
    'Rpp;Grd;GrdPres;GebcoDepth;SetNum;DepthConstraint;' ...
    'ForwLat;ForwLon;ForwGebcoDepth;ForwDiffDepth;' ...
    'BackwLat;BackLon;BackwGebcoDepth;BackDiffDepth;TrajLat;TrajLon;SpeedEst;' ...
-   ';DIFF_DEPTH_TO_START;FLOAT_VS_BATHY_TOLERANCE;FLOAT_VS_BATHY_TOLERANCE_FOR_GRD;TOOL_VERSION'];
+   'DIFF_DEPTH_TO_START;FLOAT_VS_BATHY_TOLERANCE;FLOAT_VS_BATHY_TOLERANCE_FOR_GRD;FIRST_RANGE;LAST_RANGE;RANGE_PERIOD;TOOL_VERSION'];
 fprintf(fidOut, '%s\n', header);
 
 for idC = 1:length(a_floatData.cycleNumber)
    fprintf(fidOut, ...
-      '%d;%d;%d;%s;%d;%s;%.3f;%.3f;%d;%.3f;%.1f;%.1f;%d;%.1f;%.1f;%d;%.1f;%.3f;%.3f;%.1f;%.1f;%.3f;%.3f;%.1f;%.1f;%.3f;%.3f;%.3f;;%d;%d;%d;%s\n', ...
+      '%d;%d;%d;%s;%d;%s;%.3f;%.3f;%d;%.3f;%.1f;%.1f;%d;%.1f;%.1f;%d;%.1f;%.3f;%.3f;%.1f;%.1f;%.3f;%.3f;%.1f;%.1f;%.3f;%.3f;%.3f;;%d;%d;%d;%d;%d;%d;%s\n', ...
       a_floatNum, ...
       a_floatData.cycleNumber(idC), ...
       a_floatData.direction(idC), ...
@@ -1281,6 +1320,9 @@ for idC = 1:length(a_floatData.cycleNumber)
       g_estProfLoc_diffDepthToStart, ...
       g_estProfLoc_floatVsbathyTolerance, ...
       g_estProfLoc_floatVsbathyToleranceForGrd, ...
+      g_estProfLoc_firstRange, ...
+      g_estProfLoc_lastRange, ...
+      g_estProfLoc_rangePeriod, ...
       g_estProfLoc_version ...
       );
 end
@@ -1454,7 +1496,7 @@ if (a_lon < -180)
    return
 end
 if (a_lon >= 360)
-   fprintf('ERROR: get_gebco_elev_point: input lat >= 360\n');
+   fprintf('ERROR: get_gebco_elev_point: input lon >= 360\n');
    return
 end
 if (a_lat < -90)
@@ -1677,11 +1719,6 @@ o_lat = [fliplr(latTer) a_lat(2) latBis];
 
 return
 
-
-
-
-
-% icicicicic
 % ------------------------------------------------------------------------------
 % Initialize global default values.
 %
@@ -1702,7 +1739,22 @@ return
 % ------------------------------------------------------------------------------
 function init_global_values
 
+global g_dateDef;
+global g_latDef;
+global g_lonDef;
+
+% default values
+global g_decArgo_dateDef;
+global g_decArgo_janFirst1950InMatlab;
+
 % QC flag values (numerical)
+global g_decArgo_qcDef;
+global g_decArgo_qcNoQc;
+global g_decArgo_qcGood;
+global g_decArgo_qcProbablyGood;
+global g_decArgo_qcCorrectable;
+global g_decArgo_qcBad;
+global g_decArgo_qcChanged;
 global g_decArgo_qcInterpolated;
 global g_decArgo_qcMissing;
 
@@ -1714,7 +1766,21 @@ global g_decArgo_qcStrProbablyGood;
 global g_MC_Grounded;
 
 
+g_dateDef = 99999.99999999;
+g_latDef = -99.999;
+g_lonDef = -999.999;
+
+g_decArgo_dateDef = 99999.99999999;
+g_decArgo_janFirst1950InMatlab = datenum('1950-01-01 00:00:00', 'yyyy-mm-dd HH:MM:SS');
+
 % QC flag values (numerical)
+g_decArgo_qcDef = -1;
+g_decArgo_qcNoQc = 0;
+g_decArgo_qcGood = 1;
+g_decArgo_qcProbablyGood = 2;
+g_decArgo_qcCorrectable = 3;
+g_decArgo_qcBad = 4;
+g_decArgo_qcChanged = 5;
 g_decArgo_qcInterpolated = 8;
 g_decArgo_qcMissing = 9;
 
@@ -2006,7 +2072,7 @@ global g_latDef;
 global g_lonDef;
 
 % default values initialization
-init_valdef;
+init_global_values;
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -2059,13 +2125,13 @@ lonMin = lonMin - a_zoom*2*deltaLon;
 lonMax = lonMax + a_zoom*2*deltaLon;
 
 if (latMin < -90)
-   latMin = -90;
+   latMin = -89.99;
 end
 if (latMax > 90)
-   latMax = 90;
+   latMax = 89.99;
 end
 if (lonMin < -180)
-   lonMin = -180;
+   lonMin = -179.99;
 end
 if (lonMax > borneLonMax)
    lonMax = borneLonMax;
@@ -2150,7 +2216,7 @@ o_lon = [];
 o_lat = [];
 
 if (isempty(a_gebcoFileName))
-   a_gebcoFileName = 'C:\Users\jprannou\_RNU\_ressources\GEBCO_2021\GEBCO_2021.nc';
+   a_gebcoFileName = 'C:\Users\jprannou\_RNU\_ressources\GEBCO_2022\GEBCO_2022.nc';
 end
 
 
@@ -2437,7 +2503,122 @@ clear lon lat elev longitudes latitudes
 
 return
 
+% ------------------------------------------------------------------------------
+% Convert a julian 1950 date to a gregorian date.
+%
+% SYNTAX :
+%   [o_gregorianDate] = julian_2_gregorian_dec_argo(a_julDay)
+%
+% INPUT PARAMETERS :
+%   a_julDay : julian 1950 date
+%
+% OUTPUT PARAMETERS :
+%   o_gregorianDate : gregorain date (in 'yyyy/mm/dd HH:MM' or 
+%                     'yyyy/mm/dd HH:MM:SS' format)
+%
+% EXAMPLES :
+%
+% SEE ALSO : 
+% AUTHORS  : Jean-Philippe Rannou (Altran)(jean-philippe.rannou@altran.com)
+% ------------------------------------------------------------------------------
+% RELEASES :
+%   01/02/2010 - RNU - creation
+% ------------------------------------------------------------------------------
+function [o_gregorianDate] = julian_2_gregorian_dec_argo(a_julDay)
 
+% default values
+global g_decArgo_dateDef;
+
+% output parameters initialization
+o_gregorianDate = repmat('9999/99/99 99:99:99', length(a_julDay), 1);
+
+idOk = find(~isnan(a_julDay) & (a_julDay ~= g_decArgo_dateDef));
+[dayNum, dd, mm, yyyy, HH, MI, SS] = format_juld_dec_argo(a_julDay(idOk));
+
+for idDate = 1:length(dayNum)
+   if (a_julDay(idOk(idDate)) ~= g_decArgo_dateDef)
+      o_gregorianDate(idOk(idDate), :) = sprintf('%04d/%02d/%02d %02d:%02d:%02d', ...
+         yyyy(idDate), mm(idDate), dd(idDate), HH(idDate), MI(idDate), SS(idDate));
+   end
+end
+
+return
+
+% ------------------------------------------------------------------------------
+% Split of a julian 1950 date in gregorian date parts.
+%
+% SYNTAX :
+%   [o_dayNum, o_day, o_month, o_year, o_hour, o_min, o_sec] = format_juld_dec_argo(a_juld)
+%
+% INPUT PARAMETERS :
+%   a_juld : julian 1950 date
+%
+% OUTPUT PARAMETERS :
+%   o_dayNum : julian 1950 day number
+%   o_day    : gregorian day
+%   o_month  : gregorian month
+%   o_year   : gregorian year
+%   o_hour   : gregorian hour
+%   o_min    : gregorian minute
+%   o_sec    : gregorian second
+%
+% EXAMPLES :
+%
+% SEE ALSO : 
+% AUTHORS  : Jean-Philippe Rannou (Altran)(jean-philippe.rannou@altran.com)
+% ------------------------------------------------------------------------------
+% RELEASES :
+%   01/02/2010 - RNU - creation
+% ------------------------------------------------------------------------------
+function [o_dayNum, o_day, o_month, o_year, o_hour, o_min, o_sec] = format_juld_dec_argo(a_juld)
+ 
+% output parameters initialization
+o_dayNum = []; 
+o_day = []; 
+o_month = []; 
+o_year = [];   
+o_hour = [];   
+o_min = [];
+o_sec = [];
+
+% default values
+global g_decArgo_dateDef;
+global g_decArgo_janFirst1950InMatlab;
+
+
+for id = 1:length(a_juld)
+   juldStr = num2str(a_juld(id), 11);
+   res = sscanf(juldStr, '%5d.%6d');
+   o_day(id) = res(1);
+   
+   if (o_day(id) ~= fix(g_decArgo_dateDef))
+      o_dayNum(id) = fix(a_juld(id));
+      
+      dateNum = o_day(id) + g_decArgo_janFirst1950InMatlab;
+      ymd = datestr(dateNum, 'yyyy/mm/dd');
+      res = sscanf(ymd, '%4d/%2d/%d');
+      o_year(id) = res(1);
+      o_month(id) = res(2);
+      o_day(id) = res(3);
+
+      hms = datestr(a_juld(id), 'HH:MM:SS');
+      res = sscanf(hms, '%d:%d:%d');
+      o_hour(id) = res(1);
+      o_min(id) = res(2);
+      o_sec(id) = res(3);
+   else
+      o_dayNum(id) = 99999;
+      o_day(id) = 99;
+      o_month(id) = 99;
+      o_year(id) = 9999;
+      o_hour(id) = 99;
+      o_min(id) = 99;
+      o_sec(id) = 99;
+   end
+   
+end
+
+return
 
 function [range,A12,A21]=distance_lpo(lat,long,argu1,argu2);
 % DIST    Computes distance and bearing between points on the earth
